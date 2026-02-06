@@ -1,0 +1,22 @@
+{
+  "proto": "udp",
+  "service": "dns",
+  "state": "INT",
+  "sbytes": 500000,
+  "dbytes": 0,
+  "sttl": 254,
+  "sinpkt": 2000,
+  "dinpkt": 0,
+  "dur": 0.01,
+  "smean": 250,
+  "dmean": 0,
+  "sload": 400000000,
+  "dload": 0,
+  "rate": 200000,
+  "ct_dst_sport_ltm": 50,
+  "ct_src_dport_ltm": 50,
+  "ct_srv_src": 50,
+  "ct_srv_dst": 50,
+  "ct_dst_ltm": 50,
+  "ct_src_ltm": 50
+}

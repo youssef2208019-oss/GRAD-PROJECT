@@ -1,0 +1,13 @@
+{
+    "FlowDuration": 0.000009,
+    "TotalFwdPackets": 2.0,
+    "TotalBwdPackets": 0.0,
+    "SourceBytes": 0.0,
+    "DestinationBytes": 0.0,
+    "SourceTTL": 254.0,
+    "DestinationTTL": 0.0,
+    "FlowRate": 111111.0,
+    "Protocol": "tcp",
+    "Service": "-",
+    "State": "REQ"
+}

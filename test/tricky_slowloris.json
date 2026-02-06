@@ -1,0 +1,1 @@
+{"proto": "tcp", "service": "http", "state": "CON", "sbytes": 350, "dbytes": 0, "sttl": 254, "dttl": 0, "sload": 10, "dload": 0, "rate": 0.2, "dur": 120.0, "sloss": 0, "dloss": 0, "sinpkt": 5000.0, "dinpkt": 0.0, "ct_dst_sport_ltm": 25, "ct_src_dport_ltm": 25, "ct_srv_src": 25, "ct_srv_dst": 25, "ct_dst_ltm": 25, "ct_src_ltm": 25, "swin": 255, "dwin": 0}

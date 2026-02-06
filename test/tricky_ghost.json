@@ -1,0 +1,1 @@
+{"proto": "tcp", "service": "-", "state": "INT", "sbytes": 60, "dbytes": 0, "sttl": 254, "dttl": 0, "sload": 2, "dload": 0, "rate": 0.5, "dur": 10.0, "sloss": 0, "dloss": 0, "sinpkt": 2000.0, "dinpkt": 0.0, "ct_dst_sport_ltm": 1, "ct_src_dport_ltm": 5, "ct_srv_src": 1, "ct_srv_dst": 1, "ct_dst_ltm": 1, "ct_src_ltm": 1}

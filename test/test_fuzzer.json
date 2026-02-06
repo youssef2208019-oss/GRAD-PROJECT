@@ -1,0 +1,1 @@
+{"proto": "udp", "service": "-", "state": "INT", "sbytes": 8000, "dbytes": 0, "sttl": 254, "dttl": 0, "sload": 400000, "dload": 0, "rate": 500, "sloss": 0, "dloss": 0, "sinpkt": 0.002, "dinpkt": 0.0, "ct_dst_sport_ltm": 8, "ct_src_dport_ltm": 8, "ct_srv_src": 12, "ct_srv_dst": 12, "ct_dst_ltm": 8, "ct_src_ltm": 8, "ct_state_ttl": 2}

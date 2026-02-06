@@ -1,0 +1,1 @@
+{"proto": "tcp", "service": "ftp", "state": "CON", "sbytes": 200, "dbytes": 100, "sttl": 254, "dttl": 252, "sload": 20, "dload": 10, "rate": 0.05, "dur": 60.0, "sloss": 0, "dloss": 0, "sinpkt": 15.0, "dinpkt": 15.0, "ct_dst_sport_ltm": 1, "ct_src_dport_ltm": 1, "ct_srv_src": 1, "ct_srv_dst": 1, "ct_dst_ltm": 1, "ct_src_ltm": 1, "is_sm_ips_ports": 1, "is_ftp_login": 1}
