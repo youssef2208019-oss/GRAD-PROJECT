@@ -178,7 +178,7 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
-=======
+
 # ML / Data Science specific
 *.pkl
 *.pickle
@@ -202,7 +202,9 @@ __marimo__/
 *.swo
 *~
 .DS_Store
->>>>>>> d2c4dea (Initial commit)
 
+# Large datasets (do not commit)
 unsw_training_data.json
 unsw_testing_testing.json
+xgboost-model/train.json
+xgboost-model/test.json
