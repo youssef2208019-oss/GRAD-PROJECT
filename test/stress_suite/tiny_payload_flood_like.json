@@ -1,0 +1,11 @@
+﻿{
+  "proto": "udp", "service": "-", "state": "INT",
+  "sbytes": 12000, "dbytes": 200, "sttl": 250, "dttl": 0,
+  "sload": 180000, "dload": 1000, "rate": 1200,
+  "sloss": 0, "dloss": 0, "sinpkt": 0.015, "dinpkt": 0.01,
+  "dur": 0.08, "ct_dst_sport_ltm": 18, "ct_src_dport_ltm": 18,
+  "ct_srv_src": 12, "ct_srv_dst": 12, "ct_dst_ltm": 14, "ct_src_ltm": 14,
+  "ct_state_ttl": 3, "swin": 0, "dwin": 0,
+  "synack": 0.0, "ackdat": 0.0, "sjit": 42, "djit": 26,
+  "is_sm_ips_ports": 0, "is_ftp_login": 0
+}

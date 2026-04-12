@@ -14,6 +14,7 @@ Output:
 
 import argparse
 import json
+import os
 import sys
 import numpy as np
 import pandas as pd
@@ -22,6 +23,163 @@ from typing import Dict, Any
 import warnings
 
 warnings.filterwarnings('ignore')
+
+try:
+    from groq import Groq
+except Exception:
+    Groq = None
+
+
+# --- MITRE ATT&CK MAPPING ---
+mitre_mapping = {
+    "Reconnaissance": {
+        "tactic": "Reconnaissance (TA0043)",
+        "technique": "Active Scanning (T1595)",
+        "url": "https://attack.mitre.org/techniques/T1595/"
+    },
+    "Exploits": {
+        "tactic": "Initial Access (TA0001)",
+        "technique": "Exploit Public-Facing Application (T1190)",
+        "url": "https://attack.mitre.org/techniques/T1190/"
+    },
+    "DoS": {
+        "tactic": "Impact (TA0040)",
+        "technique": "Network Denial of Service (T1498)",
+        "url": "https://attack.mitre.org/techniques/T1498/"
+    },
+    "Fuzzers": {
+        "tactic": "Impact (TA0040)",
+        "technique": "Endpoint Denial of Service (T1499)",
+        "url": "https://attack.mitre.org/techniques/T1499/"
+    },
+    "Generic": {
+        "tactic": "Execution (TA0002)",
+        "technique": "Command and Scripting Interpreter (T1059)",
+        "url": "https://attack.mitre.org/techniques/T1059/"
+    },
+    "Analysis": {
+        "tactic": "Discovery (TA0007)",
+        "technique": "Network Service Discovery (T1046)",
+        "url": "https://attack.mitre.org/techniques/T1046/"
+    },
+    "Normal": {
+        "tactic": "None",
+        "technique": "None",
+        "url": "None"
+    }
+}
+
+# Keep the LLM for genuinely uncertain normal cases so we do not burn quota.
+NORMAL_LLM_CONFIDENCE_THRESHOLD = 0.85
+NORMAL_LLM_ANOMALY_THRESHOLD = 0.10
+
+
+def get_groq_client():
+    """Create a Groq client only when the package and API key are available."""
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not Groq or not api_key:
+        return None
+
+    try:
+        return Groq(api_key=api_key)
+    except Exception:
+        return None
+
+
+def generate_soc_report(raw_log: Dict[str, Any], prediction: str, confidence: float) -> Dict[str, str]:
+    """Generate a strict JSON SOC report for the predicted event."""
+    groq_client = get_groq_client()
+    if not groq_client:
+        return {
+            "executive_summary": "LLM integration disabled: API key or groq package not available.",
+            "mitre_technique": "Unknown",
+            "firewall_rule_recommendation": "No recommendation generated.",
+        }
+
+    ml_hint_map = {
+        "Fuzzers": "MITRE T1499 (Endpoint Denial of Service). Focus on malformed data injection.",
+        "DoS": "MITRE T1498 (Network Denial of Service). Focus on volumetric traffic and rate limits.",
+        "Reconnaissance": "MITRE T1595 (Active Scanning). Focus on port scanning and host discovery.",
+        "Exploits": "MITRE T1190 (Exploit Public-Facing Application). Focus on payload delivery.",
+        "Generic": "MITRE T1071 (Application Layer Protocol). Focus on anomalous protocol usage.",
+        "Analysis": "MITRE T1046 (Network Service Discovery). Focus on host/service probing behavior.",
+        "Normal": "No confirmed ATT&CK technique. Validate against baseline behavior.",
+    }
+
+    system_prompt = (
+        "You are an elite Tier-3 SOC Analyst. Your objective is to analyze network flow data and provide a structured incident report. "
+        "You MUST output your response as a raw, valid JSON object. "
+        "DO NOT include any conversational text, markdown formatting, or explanations outside of the JSON structure. "
+        "Your JSON must exactly match this schema: "
+        "{"
+        "\"executive_summary\": \"A 2-sentence summary of the threat.\", "
+        "\"mitre_technique\": \"The specific MITRE ATT&CK Tactic and ID.\", "
+        "\"firewall_rule_recommendation\": \"The exact IPtables or Firewall rule logic to block this.\""
+        "}"
+    )
+
+    user_prompt = (
+        f"The Machine Learning Detection Engine has classified the following network log as a '{prediction}' "
+        f"attack with {confidence * 100:.2f}% confidence.\n"
+        f"Analyst Context: {ml_hint_map.get(prediction, 'Analyze for general network anomalies.')}\n\n"
+        f"Raw Network Log:\n{json.dumps(raw_log, ensure_ascii=True)}"
+    )
+
+    def normalize_report(parsed: Dict[str, Any]) -> Dict[str, str]:
+        return {
+            "executive_summary": str(parsed.get("executive_summary", "No summary produced.")),
+            "mitre_technique": str(parsed.get("mitre_technique", ml_hint_map.get(prediction, "Unknown"))),
+            "firewall_rule_recommendation": str(
+                parsed.get("firewall_rule_recommendation", "Apply temporary block/rate-limit and investigate source.")
+            ),
+        }
+
+    try:
+        chat_completion = groq_client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            model="llama-3.3-70b-versatile",
+            temperature=0.1,
+            response_format={"type": "json_object"},
+        )
+        parsed = json.loads(chat_completion.choices[0].message.content)
+        return normalize_report(parsed)
+    except Exception as e:
+        try:
+            chat_completion = groq_client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                model="llama-3.3-70b-versatile",
+                temperature=0.1,
+            )
+            parsed = json.loads(chat_completion.choices[0].message.content)
+            return normalize_report(parsed)
+        except Exception as fallback_error:
+            return {
+                "executive_summary": f"LLM Generation Failed: {fallback_error}",
+                "mitre_technique": ml_hint_map.get(prediction, "Unknown"),
+                "firewall_rule_recommendation": "Apply temporary block/rate-limit and investigate source.",
+            }
+
+
+def should_call_llm(result: Dict[str, Any]) -> bool:
+    """Return True only when the event is risky enough to justify an LLM call."""
+    prediction = result.get("prediction", "")
+    confidence = float(result.get("confidence", 0.0) or 0.0)
+    anomaly_score = float(result.get("anomaly_score", 0.0) or 0.0)
+    risk_level = str(result.get("risk_level", "")).lower()
+
+    if risk_level.startswith("high") or risk_level.startswith("medium"):
+        return True
+
+    return prediction == "Normal" and (
+        confidence < NORMAL_LLM_CONFIDENCE_THRESHOLD
+        or anomaly_score > NORMAL_LLM_ANOMALY_THRESHOLD
+    )
 
 
 def map_log_fields(log_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -81,7 +239,7 @@ def load_model_artifacts(model_path: str = 'soc_model.pkl') -> Dict[str, Any]:
         sys.exit(1)
 
 
-def preprocess_log(log_data: Dict[str, Any], artifacts: Dict[str, Any]) -> np.ndarray:
+def preprocess_log(log_data: Dict[str, Any], artifacts: Dict[str, Any], verbose: bool = True) -> np.ndarray:
     """
     Preprocess a single log entry to match training pipeline:
     1. Map field names from common formats to training names
@@ -139,8 +297,9 @@ def preprocess_log(log_data: Dict[str, Any], artifacts: Dict[str, Any]) -> np.nd
     df = df.rename(columns=dynamic_map)
     # ---------------------------
 
-    print(f"  Raw log columns: {list(log_data.keys())}", file=sys.stderr)
-    print(f"  Mapped columns: {df.columns.tolist()}", file=sys.stderr)
+    if verbose:
+        print(f"  Raw log columns: {list(log_data.keys())}", file=sys.stderr)
+        print(f"  Mapped columns: {df.columns.tolist()}", file=sys.stderr)
 
     # STEP 1: Encode categorical features
     categorical_cols = [c for c in label_encoders.keys() if c in df.columns]
@@ -155,7 +314,8 @@ def preprocess_log(log_data: Dict[str, Any], artifacts: Dict[str, Any]) -> np.nd
                 df[col] = le.transform([value])[0]
             else:
                 # Assign to most common class (index 0) or use -1
-                print(f"  WARNING: Unseen value '{value}' for '{col}', using default (0)", file=sys.stderr)
+                if verbose:
+                    print(f"  WARNING: Unseen value '{value}' for '{col}', using default (0)", file=sys.stderr)
                 df[col] = 0
         elif col in label_encoders:
             # Column missing from log but encoder exists - fill with default
@@ -171,7 +331,8 @@ def preprocess_log(log_data: Dict[str, Any], artifacts: Dict[str, Any]) -> np.nd
     df = df.fillna(0)
     
     # STEP 3: CRITICAL - Create the same 8 engineered features from training
-    print(f"  Creating engineered features...", file=sys.stderr)
+    if verbose:
+        print(f"  Creating engineered features...", file=sys.stderr)
     
     # Feature 1: sbytes_per_pkt
     if 'sbytes' in df.columns and 'sinpkt' in df.columns:
@@ -228,7 +389,8 @@ def preprocess_log(log_data: Dict[str, Any], artifacts: Dict[str, Any]) -> np.nd
     # Remove duplicate columns if any (can cause feature count mismatch)
     if df.columns.duplicated().any():
         dup_cols = df.columns[df.columns.duplicated()].unique().tolist()
-        print(f"  WARNING: Dropping duplicate columns: {dup_cols}", file=sys.stderr)
+        if verbose:
+            print(f"  WARNING: Dropping duplicate columns: {dup_cols}", file=sys.stderr)
         df = df.loc[:, ~df.columns.duplicated()]
     # Prefer scaler's feature names if available to avoid mismatch
     if hasattr(scaler, 'feature_names_in_') and len(scaler.feature_names_in_) > 0:
@@ -236,10 +398,11 @@ def preprocess_log(log_data: Dict[str, Any], artifacts: Dict[str, Any]) -> np.nd
     else:
         expected_features = list(feature_names)
         if hasattr(scaler, 'n_features_in_') and len(expected_features) != scaler.n_features_in_:
-            print(
-                f"  WARNING: feature_names length ({len(expected_features)}) != scaler expects ({scaler.n_features_in_}).",
-                file=sys.stderr
-            )
+            if verbose:
+                print(
+                    f"  WARNING: feature_names length ({len(expected_features)}) != scaler expects ({scaler.n_features_in_}).",
+                    file=sys.stderr
+                )
             expected_features = expected_features[:scaler.n_features_in_]
 
     # De-duplicate expected features while preserving order
@@ -257,22 +420,26 @@ def preprocess_log(log_data: Dict[str, Any], artifacts: Dict[str, Any]) -> np.nd
     df = df[expected_features]  # <--- THIS FORCES THE EXACT ORDER
 
     if missing_features:
-        print(f"  WARNING: {len(missing_features)} features missing from log (filled with 0)", file=sys.stderr)
+        if verbose:
+            print(f"  WARNING: {len(missing_features)} features missing from log (filled with 0)", file=sys.stderr)
         if len(missing_features) <= 5:
-            print(f"    Missing: {missing_features}", file=sys.stderr)
+            if verbose:
+                print(f"    Missing: {missing_features}", file=sys.stderr)
 
-    print(f"✓ Columns aligned. Order: {df.columns.tolist()[:5]}...", file=sys.stderr)
+    if verbose:
+        print(f"✓ Columns aligned. Order: {df.columns.tolist()[:5]}...", file=sys.stderr)
     # ---------------------------------------------
 
     # STEP 5: Scale using trained scaler
     X_scaled = scaler.transform(df)
     
-    print(f"  ✓ Preprocessed: {X_scaled.shape[1]} features", file=sys.stderr)
+    if verbose:
+        print(f"  ✓ Preprocessed: {X_scaled.shape[1]} features", file=sys.stderr)
     
     return X_scaled
 
 
-def predict_attack(log_data: Dict[str, Any], artifacts: Dict[str, Any]) -> Dict[str, Any]:
+def predict_attack(log_data: Dict[str, Any], artifacts: Dict[str, Any], verbose: bool = True) -> Dict[str, Any]:
     """
     Predict attack type for a single log entry.
     
@@ -284,7 +451,7 @@ def predict_attack(log_data: Dict[str, Any], artifacts: Dict[str, Any]) -> Dict[
         Dict with prediction, confidence, and risk_level
     """
     # Preprocess log
-    X = preprocess_log(log_data, artifacts)
+    X = preprocess_log(log_data, artifacts, verbose=verbose)
     
     # Get model
     model = artifacts['model']
@@ -303,7 +470,8 @@ def predict_attack(log_data: Dict[str, Any], artifacts: Dict[str, Any]) -> Dict[
     if y_pred not in all_class_names:
         # Add missing class (likely "Other" at index 6)
         all_class_names[y_pred] = 'Other'
-        print(f"  WARNING: Class index {y_pred} missing, using 'Other'", file=sys.stderr)
+        if verbose:
+            print(f"  WARNING: Class index {y_pred} missing, using 'Other'", file=sys.stderr)
     
     predicted_class = all_class_names[y_pred]
 
@@ -334,8 +502,9 @@ def predict_attack(log_data: Dict[str, Any], artifacts: Dict[str, Any]) -> Dict[
                 best_attack = cls
         
         if best_attack:
-            print(f"⚠️ Vote Split Detected! Normal ({p_normal:.2f}) < Total Attack ({p_attack:.2f}).", file=sys.stderr)
-            print(f"   -> Overriding prediction to: {best_attack}", file=sys.stderr)
+            if verbose:
+                print(f"Vote Split Detected: Normal ({p_normal:.2f}) < Total Attack ({p_attack:.2f}).", file=sys.stderr)
+                print(f"  Overriding prediction to: {best_attack}", file=sys.stderr)
             predicted_class = best_attack
             confidence = max_prob
             risk_level = "High (Aggregated Confidence)"
@@ -400,6 +569,11 @@ def main():
         action='store_true',
         help='Show detailed preprocessing info'
     )
+    parser.add_argument(
+        '--report',
+        action='store_true',
+        help='Add an optional Groq SOC report to the JSON output'
+    )
     
     args = parser.parse_args()
 
@@ -445,9 +619,62 @@ def main():
         
         # Predict
         result = predict_attack(log_data, artifacts)
-        
+
+        prediction = result['prediction']
+        confidence = result['confidence']
+        risk_level = result['risk_level']
+
+        # --- LLM TRIGGER LOGIC ---
+        # Generate the report only for clearly risky events or genuinely uncertain normal traffic.
+        llm_report = None
+        if args.report and should_call_llm(result):
+            print("\n🤖 Waking up LLM (Llama 3) for Second Opinion...", file=sys.stderr)
+            llm_report = generate_soc_report(log_data, prediction, confidence)
+
+            if args.verbose:
+                print("\n🚨 --- AI INCIDENT REPORT --- 🚨", file=sys.stderr)
+                print(llm_report, file=sys.stderr)
+                print("---------------------------------\n", file=sys.stderr)
+
+        # Look up the MITRE info based on the ML prediction.
+        # If prediction is unknown, default to Generic.
+        mitre_info = mitre_mapping.get(prediction, mitre_mapping["Generic"])
+        mitre_summary = (
+            f"MITRE Tactic: {mitre_info['tactic']}\n"
+            f"MITRE Technique: {mitre_info['technique']}\n"
+            f"MITRE URL: {mitre_info['url']}"
+        )
+        if llm_report:
+            llm_analysis_payload: Dict[str, Any] = {
+                "mitre_summary": mitre_summary,
+                "report": llm_report,
+            }
+        else:
+            llm_analysis_payload = {
+                "mitre_summary": mitre_summary,
+                "report": {
+                    "executive_summary": "Traffic normal. LLM bypassed.",
+                    "mitre_technique": mitre_info['technique'],
+                    "firewall_rule_recommendation": "No immediate block action required.",
+                },
+            }
+
+        anomaly_score = float(result.get('anomaly_score', 0.0) or 0.0)
+
+        final_result = {
+            'prediction': prediction,
+            'confidence': round(float(confidence), 4),
+            'risk_level': risk_level,
+            'anomaly_score': round(float(anomaly_score), 4),
+            'mitre_tactic': mitre_info['tactic'],
+            'mitre_technique': mitre_info['technique'],
+            'mitre_url': mitre_info['url'],
+            'probabilities': result.get('probabilities'),
+            'llm_analysis': llm_analysis_payload
+        }
+
         # Output strict JSON for Wazuh parsing
-        print(json.dumps(result, indent=2 if args.verbose else None))
+        print(json.dumps(final_result, indent=2 if args.verbose else None))
         
     except Exception as e:
         print(json.dumps({'error': str(e)}))

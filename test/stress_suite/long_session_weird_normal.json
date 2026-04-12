@@ -1,0 +1,11 @@
+﻿{
+  "proto": "tcp", "service": "http", "state": "CON",
+  "sbytes": 4600, "dbytes": 5200, "sttl": 33, "dttl": 31,
+  "sload": 15000, "dload": 19000, "rate": 65,
+  "sloss": 1, "dloss": 1, "sinpkt": 4.5, "dinpkt": 4.2,
+  "dur": 6.8, "ct_dst_sport_ltm": 1, "ct_src_dport_ltm": 1,
+  "ct_srv_src": 1, "ct_srv_dst": 1, "ct_dst_ltm": 1, "ct_src_ltm": 1,
+  "ct_state_ttl": 1, "swin": 255, "dwin": 255,
+  "synack": 0.02, "ackdat": 0.02, "sjit": 12, "djit": 10,
+  "is_sm_ips_ports": 0, "is_ftp_login": 0
+}
