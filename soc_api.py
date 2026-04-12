@@ -26,7 +26,8 @@ app = Flask(__name__)
 
 # Keep API output clean by default; set SOC_DEBUG=1 to see full predictor logs.
 QUIET_INFERENCE = os.environ.get("SOC_DEBUG", "0") != "1"
-LLM_MIN_INTERVAL_SEC = float(os.environ.get("SOC_LLM_MIN_INTERVAL_SEC", "2.0"))
+# 5.0 seconds = 12 API calls/minute (60% safety margin below 30/min Groq limit; prioritizes stability over throughput)
+LLM_MIN_INTERVAL_SEC = float(os.environ.get("SOC_LLM_MIN_INTERVAL_SEC", "5.0"))
 _LLM_LOCK = threading.Lock()
 _LAST_LLM_CALL_AT = 0.0
 _LLM_COOLDOWN_UNTIL = 0.0
@@ -68,9 +69,10 @@ def run_llm(raw_data: Dict[str, Any], prediction: str, confidence: float) -> Dic
     report_text = json.dumps(report, ensure_ascii=True).lower()
     if "rate_limit_exceeded" in report_text or "error code: 429" in report_text:
         retry_match = re.search(r"try again in\s+([0-9.]+)s", report_text, flags=re.IGNORECASE)
-        retry_after = float(retry_match.group(1)) if retry_match else 5.0
+        retry_after = float(retry_match.group(1)) if retry_match else 2.0
         with _LLM_LOCK:
-            _LLM_COOLDOWN_UNTIL = max(_LLM_COOLDOWN_UNTIL, time.time() + retry_after + 1.0)
+            # Minimal cooldown: only respect the API's retry_after period
+            _LLM_COOLDOWN_UNTIL = max(_LLM_COOLDOWN_UNTIL, time.time() + retry_after)
 
     return report
 

@@ -70,8 +70,9 @@ mitre_mapping = {
 }
 
 # Keep the LLM for genuinely uncertain normal cases so we do not burn quota.
-NORMAL_LLM_CONFIDENCE_THRESHOLD = 0.85
-NORMAL_LLM_ANOMALY_THRESHOLD = 0.10
+# Thresholds are conservative to stay well below 30 calls/minute Groq limit.
+NORMAL_LLM_CONFIDENCE_THRESHOLD = 0.90  # Raised from 0.85 for stricter filtering
+NORMAL_LLM_ANOMALY_THRESHOLD = 0.15  # Raised from 0.10 for stricter filtering
 
 
 def get_groq_client():
@@ -106,17 +107,20 @@ def generate_soc_report(raw_log: Dict[str, Any], prediction: str, confidence: fl
         "Normal": "No confirmed ATT&CK technique. Validate against baseline behavior.",
     }
 
-    system_prompt = (
-        "You are an elite Tier-3 SOC Analyst. Your objective is to analyze network flow data and provide a structured incident report. "
-        "You MUST output your response as a raw, valid JSON object. "
-        "DO NOT include any conversational text, markdown formatting, or explanations outside of the JSON structure. "
-        "Your JSON must exactly match this schema: "
-        "{"
-        "\"executive_summary\": \"A 2-sentence summary of the threat.\", "
-        "\"mitre_technique\": \"The specific MITRE ATT&CK Tactic and ID.\", "
-        "\"firewall_rule_recommendation\": \"The exact IPtables or Firewall rule logic to block this.\""
-        "}"
-    )
+    system_prompt = """You are an elite Tier-3 SOC Analyst. 
+Your objective is to analyze network flow data and provide a structured JSON incident report.
+
+CRITICAL FIREWALL RULE INSTRUCTIONS:
+Never write blanket rules that block entire ports or protocols for all users (e.g., do not just block --dport 53). 
+You MUST extract the attacker's Source IP address from the provided log data (look for 'srcip', 'saddr', or 'src').
+Your recommended iptables rule MUST target only that specific malicious Source IP using the '-s' flag.
+
+Your JSON must exactly match this schema:
+{
+    "executive_summary": "A 2-sentence summary of the threat.",
+    "mitre_technique": "The specific MITRE ATT&CK Tactic and ID.",
+    "firewall_rule_recommendation": "The targeted iptables rule blocking the specific Source IP."
+}"""
 
     user_prompt = (
         f"The Machine Learning Detection Engine has classified the following network log as a '{prediction}' "
