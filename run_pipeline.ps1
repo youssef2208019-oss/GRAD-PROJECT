@@ -1,8 +1,10 @@
 param(
-    [int]$Rows = 500,
-    [double]$IntervalSec = 0.5,
+    [int]$Rows = 30,
+    [double]$IntervalSec = 5.0,
     [string]$LogstashHome = "",
-    [switch]$NoForever
+    [switch]$NoForever,
+    [int]$WarmupSec = 15,
+    [switch]$KeepExistingStream
 )
 
 $ErrorActionPreference = 'Stop'
@@ -34,6 +36,12 @@ if (-not $NoForever) {
 }
 $GeneratorCommand = "Set-Location '$ProjectRoot'; & '$PythonExe' generate_jitter_stream.py $GeneratorArgs"
 
+$StreamPath = Join-Path $ProjectRoot 'simulated_stream.jsonl'
+if (-not $KeepExistingStream) {
+    # Start from an empty stream file so Logstash does not ingest historical backlog on boot.
+    # Set-Content -Path $StreamPath -Value '' -Encoding utf8
+}
+
 Start-Process powershell -ArgumentList '-NoExit', '-Command', $ApiCommand -WorkingDirectory $ProjectRoot | Out-Null
 
 if ($LogstashHome) {
@@ -46,6 +54,11 @@ if ($LogstashHome) {
     Start-Process powershell -ArgumentList '-NoExit', '-Command', $LogstashCommand -WorkingDirectory $ProjectRoot | Out-Null
 } else {
     Write-Host "Logstash path not found. Set LOGSTASH_HOME or pass -LogstashHome when calling this script."
+}
+
+if ($WarmupSec -gt 0) {
+    Write-Host "Warming up services for $WarmupSec seconds before starting generator..."
+    Start-Sleep -Seconds $WarmupSec
 }
 
 Start-Process powershell -ArgumentList '-NoExit', '-Command', $GeneratorCommand -WorkingDirectory $ProjectRoot | Out-Null
