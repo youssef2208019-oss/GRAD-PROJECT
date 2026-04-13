@@ -41,7 +41,6 @@ Thumbs.db
 *.log
 
 # Local model/data artifacts
-*.pkl
 *.pickle
 *.joblib
 merged_dataset.csv
